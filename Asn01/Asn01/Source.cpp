@@ -5,7 +5,7 @@
 enum SpecialSymbol {
 	NIL, LEFT_PAREN, RIGHT_PAREN,
 	DEFINE, LAMBDA, QUOTE,
-	PLUS, MINUS, TIMES,
+	PLUS, MINUS, TIMES, DIVIDE,
 	CAR, CDR, CONS, COND,
 	isNULL, isEQ, isEQUAL, isNUMBER, isSYMBOL,
 	NUM_OF_SPECIAL_SYMBOL
@@ -21,6 +21,7 @@ void InitializeSpecialSymbol() {
 	special_symbol[PLUS] = "+";
 	special_symbol[MINUS] = "-";
 	special_symbol[TIMES] = "*";
+	special_symbol[DIVIDE] = '/';
 	special_symbol[CAR] = "car";
 	special_symbol[CDR] = "cdr";
 	special_symbol[CONS] = "cons";
@@ -169,13 +170,10 @@ std::string GetNextToken() {
 	if (buf >> temp) {
 		ASCIILower(temp);
 		size_t i = 0;
-		for (; i < temp.size() && temp.at(i) != '(' && temp.at(i) != ')'; ++i) {
+		for (; i < temp.size(); ++i) {
 			if (temp.at(i) == '(') break;
 			if (temp.at(i) == ')') break;
 			if (temp.at(i) == '\'') break;
-			if (temp.at(i) == '+') break;
-			if (temp.at(i) == '-') break;
-			if (temp.at(i) == '*') break;
 		};
 		if (i > 0) {
 			buf.seekg(buf.tellg() - std::streampos(temp.size() - i));
@@ -366,23 +364,30 @@ std::string Preprocess() {
 	return pre_buf.str();
 }
 
-bool IsNumber(std::string token) {
-	auto iter = token.begin();
-	for (; iter != token.end() && *iter >= '0' && *iter <= '9'; ++iter);
-	if (iter == token.end()) return true;
-	else return false;
+// return 0 if non-numeric, 1 if int, 2 if double
+int IsNumber(std::string token) {
+	std::stringstream temp(token);
+	int num1;
+	temp >> num1;
+	if (!temp.fail() && temp.eof()) return 1;
+	temp.clear();
+	temp.str(token);
+	double num2;
+	temp >> num2;
+	if (!temp.fail() && temp.eof()) return 2;
+	return 0;
 }
 
 int Evaluate(int root) {
 	// empty list
 	if (root == NIL) return root;
-	// element
+	// variable
 	if (root < NIL) {
-		if (hash_table[-root].value == NIL) return root;
-		else return Evaluate(hash_table[-root].value);
+		if (IsNumber(hash_table[-root].symbol)) return root;
+		return hash_table[-root].value;
 	}
 	// list
-	int function_hash = Evaluate(memory_table[root].lchild);
+	int function_hash = memory_table[root].lchild;
 	if (function_hash == NIL) {
 		runtime_error.occur = true;
 		runtime_error.message << "You tried to call a NIL function\n";
@@ -395,6 +400,16 @@ int Evaluate(int root) {
 			runtime_error.message << "You tried to define a list which is not a symbol\n";
 			return NIL;
 		}
+		if (-arg_hash < NUM_OF_SPECIAL_SYMBOL) {
+			runtime_error.occur = true;
+			runtime_error.message << "You tried to define a pre-defined keyword\n";
+			return NIL;
+		}
+		if (IsNumber(hash_table[-arg_hash].symbol)) {
+			runtime_error.occur = true;
+			runtime_error.message << "You tried to define a number\n";
+			return NIL;
+		}
 		hash_table[-arg_hash].value = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 		return arg_hash;
 	}
@@ -405,51 +420,85 @@ int Evaluate(int root) {
 		int arg2_hash = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 		if (arg1_hash >= NIL || arg2_hash >= NIL) {
 			runtime_error.occur = true;
-			runtime_error.message << "You tried to numerically add a list which is not a number\n";
+			runtime_error.message << "You tried to add a list which is not a number\n";
 			return NIL;
 		}
 		std::string arg1_symbol = hash_table[-arg1_hash].symbol;
 		std::string arg2_symbol = hash_table[-arg2_hash].symbol;
-		if (!IsNumber(arg1_symbol) || !IsNumber(arg2_symbol)) {
+		int arg1_isnum = IsNumber(arg1_symbol);
+		int arg2_isnum = IsNumber(arg2_symbol);
+		if (!arg1_isnum || !arg2_isnum) {
 			runtime_error.occur = true;
-			runtime_error.message << "You tried to numerically add a symbol which is not a number\n";
+			runtime_error.message << "You tried to add a non-numeric symbol\n";
 			return NIL;
 		}
-		return GetHashValue(std::to_string(std::stoi(arg1_symbol) + std::stoi(arg2_symbol)));
+		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) + std::stoi(arg2_symbol)));
+		return GetHashValue(std::to_string(std::stod(arg1_symbol) + std::stod(arg2_symbol)));
 	}
 	if (-function_hash == MINUS) {
 		int arg1_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
 		int arg2_hash = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 		if (arg1_hash >= NIL || arg2_hash >= NIL) {
 			runtime_error.occur = true;
-			runtime_error.message << "You tried to numerically subtract a list which is not a number\n";
+			runtime_error.message << "You tried to subtract a list which is not a number\n";
 			return NIL;
 		}
 		std::string arg1_symbol = hash_table[-arg1_hash].symbol;
 		std::string arg2_symbol = hash_table[-arg2_hash].symbol;
-		if (!IsNumber(arg1_symbol) || !IsNumber(arg2_symbol)) {
+		int arg1_isnum = IsNumber(arg1_symbol);
+		int arg2_isnum = IsNumber(arg2_symbol);
+		if (!arg1_isnum || !arg2_isnum) {
 			runtime_error.occur = true;
-			runtime_error.message << "You tried to numerically subtract a symbol which is not a number\n";
+			runtime_error.message << "You tried to subtract a non-numeric symbol\n";
 			return NIL;
 		}
-		return GetHashValue(std::to_string(std::stoi(arg1_symbol) - std::stoi(arg2_symbol)));
+		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) - std::stoi(arg2_symbol)));
+		return GetHashValue(std::to_string(std::stod(arg1_symbol) - std::stod(arg2_symbol)));
 	}
 	if (-function_hash == TIMES) {
 		int arg1_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
 		int arg2_hash = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 		if (arg1_hash >= NIL || arg2_hash >= NIL) {
 			runtime_error.occur = true;
-			runtime_error.message << "You tried to numerically multiply a list which is not a number\n";
+			runtime_error.message << "You tried to multiply a list which is not a number\n";
 			return NIL;
 		}
 		std::string arg1_symbol = hash_table[-arg1_hash].symbol;
 		std::string arg2_symbol = hash_table[-arg2_hash].symbol;
-		if (!IsNumber(arg1_symbol) || !IsNumber(arg2_symbol)) {
+		int arg1_isnum = IsNumber(arg1_symbol);
+		int arg2_isnum = IsNumber(arg2_symbol);
+		if (!arg1_isnum || !arg2_isnum) {
 			runtime_error.occur = true;
-			runtime_error.message << "You tried to numerically multiply a symbol which is not a number\n";
+			runtime_error.message << "You tried to multiply a non-numeric symbol\n";
 			return NIL;
 		}
-		return GetHashValue(std::to_string(std::stoi(arg1_symbol) * std::stoi(arg2_symbol)));
+		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) * std::stoi(arg2_symbol)));
+		return GetHashValue(std::to_string(std::stod(arg1_symbol) * std::stod(arg2_symbol)));
+	}
+	if (-function_hash == DIVIDE) {
+		int arg1_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
+		int arg2_hash = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
+		if (arg1_hash >= NIL || arg2_hash >= NIL) {
+			runtime_error.occur = true;
+			runtime_error.message << "You tried to divide (by) a list which is not a number\n";
+			return NIL;
+		}
+		std::string arg1_symbol = hash_table[-arg1_hash].symbol;
+		std::string arg2_symbol = hash_table[-arg2_hash].symbol;
+		int arg1_isnum = IsNumber(arg1_symbol);
+		int arg2_isnum = IsNumber(arg2_symbol);
+		if (!arg1_isnum || !arg2_isnum) {
+			runtime_error.occur = true;
+			runtime_error.message << "You tried to divide (by) a non-numeric symbol\n";
+			return NIL;
+		}
+		if (std::stod(arg2_symbol) == 0.0) {
+			runtime_error.occur = true;
+			runtime_error.message << "You tried to divide by zero\n";
+			return NIL;
+		}
+		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) / std::stoi(arg2_symbol)));
+		return GetHashValue(std::to_string(std::stod(arg1_symbol) / std::stod(arg2_symbol)));
 	}
 	if (-function_hash == CAR) {
 		int arg_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);

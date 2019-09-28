@@ -7,6 +7,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <ctime>
+#include <sstream>
 
 bool is_sorted_asc(int* arr, int size) {
 	for (int i = 0; i < size - 1; ++i) {
@@ -102,24 +103,44 @@ void print_arr(int* arr, int size) {
 	return;
 }
 
-int main() {
-	int n;
-	std::cin >> n;
-	int* arr = new int[n];
-	std::srand(static_cast<unsigned int>(std::time(nullptr)));
-	for (int i = 0; i < n; ++i) {
-		arr[i] = std::rand() % n;
+int IsNumber(std::string str) {
+	std::stringstream temp(str);
+	int integer;
+	temp >> integer;
+	std::cout << integer << std::endl;
+	if (!temp.fail() && temp.eof()) return 1;
+	temp.str(str);
+	temp.clear();
+	double floating_point;
+	temp >> floating_point;
+	std::cout << floating_point << std::endl;
+	if(!temp.fail() && temp.eof()) return 2;
+	return 0;
+}
+
+void PrintState(const std::stringstream& buf) {
+	std::cout << "state:" << std::endl;
+	if (buf.good()) {
+		std::cout << "goodbit" << std::endl;
 	}
-	
-	std::cout << "Before operation: ";
-	print_sorted(is_sorted_asc(arr, n));
-	print_arr(arr, n);
+	if (buf.eof()) {
+		std::cout << "eofbit" << std::endl;
+	}
+	if (buf.fail()) {
+		std::cout << "failbit" << std::endl;
+	}
+	if (buf.bad()) {
+		std::cout << "badbit" << std::endl;
+	}
+	std::cout << "state end" << std::endl << std::endl;
+	return;
+}
 
-	MergeSort_ITER(arr, 0, n - 1);
-
-	std::cout << "After operation: ";
-	print_sorted(is_sorted_asc(arr, n));
-	print_arr(arr, n);
-
+int main() {
+	while (true) {
+		std::string buffer;
+		getline(std::cin, buffer);
+		std::cout << IsNumber(buffer) << std::endl << std::endl;
+	}
 	return 0;
 }
