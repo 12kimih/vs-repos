@@ -435,6 +435,24 @@ int IsNumber(std::string token) {
 	return 0;
 }
 
+bool StructureTest(int hash1, int hash2) {
+	if (hash1 <= NIL) {
+		if (hash2 <= NIL) {
+			if (hash1 == hash2) return true;
+			else return false;
+		}
+		else return false;
+	}
+	else {
+		if (hash2 <= NIL) return false;
+		else {
+			if (!StructureTest(memory_table[hash1].lchild, memory_table[hash2].lchild)) return false;
+			if (StructureTest(memory_table[hash1].rchild, memory_table[hash2].rchild)) return true;
+			else return false;
+		}
+	}
+}
+
 int Evaluate(int root);
 
 void Substitute(int parameter_list, int argument_list) {
@@ -736,7 +754,7 @@ int Evaluate(int root) {
 			runtime_error.Mark("2 arguments are expected for isEQUAL but more than 2 arguments were passed");
 			return NIL;
 		}
-		if (Evaluate(memory_table[memory_table[root].rchild].lchild) == Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild)) return -TRUE;
+		if (StructureTest(Evaluate(memory_table[memory_table[root].rchild].lchild), Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild))) return -TRUE;
 		else return -FALSE;
 	}
 	if (-function_hash == isNUMBER) {
@@ -744,7 +762,7 @@ int Evaluate(int root) {
 			runtime_error.Mark("1 argument is expected for isNUMBER but more than 1 argument were passed");
 			return NIL;
 		}
-		int arg_hash = Evaluate(memory_table[root].rchild);
+		int arg_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
 		if (arg_hash > 0) return -FALSE;
 		if (IsNumber(hash_table[-arg_hash].symbol) == 0) return -FALSE;
 		else return -TRUE;
@@ -754,7 +772,7 @@ int Evaluate(int root) {
 			runtime_error.Mark("1 argument is expected for isSYMBOL but more than 1 argument were passed");
 			return NIL;
 		}
-		int arg_hash = Evaluate(memory_table[root].rchild);
+		int arg_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
 		if (arg_hash >= 0) return -FALSE;
 		if (IsNumber(hash_table[-arg_hash].symbol) != 0) return -FALSE;
 		else return -TRUE;
