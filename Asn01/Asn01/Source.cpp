@@ -176,9 +176,7 @@ Stack<Pair> function_stack;
 void Initialize() {
 	// node array initialisation
 	memory_table = new Node[MEMORY_TABLE_SIZE];
-	for (int i = 1; i < MEMORY_TABLE_SIZE - 1; ++i) {
-		memory_table[i].rchild = i + 1;
-	}
+	for (int i = 1; i < MEMORY_TABLE_SIZE - 1; ++i) memory_table[i].rchild = i + 1;
 	free_list = 1;
 	// hash table initialisation
 	hash_table = new Symbol[HASH_TABLE_SIZE];
@@ -191,6 +189,7 @@ void ReadLine() {
 	std::string temp;
 	std::getline(std::cin, temp);
 	buf.str(temp + std::string(" "));
+	buf.clear();
 	return;
 }
 
@@ -233,7 +232,7 @@ std::string GetNextToken() {
 			if (temp.at(i) == '(') break;
 			if (temp.at(i) == ')') break;
 			if (temp.at(i) == '\'') break;
-		};
+		}
 		if (i > 0) {
 			buf.seekg(buf.tellg() - std::streampos(temp.size() - i));
 			return temp.substr(0, i);
@@ -243,19 +242,11 @@ std::string GetNextToken() {
 			return temp.substr(0, 1);
 		}
 	}
-	else {
-		buf.clear();
-		return std::string();
-	}
+	else return std::string();
 }
 
 void PushBack() {
 	buf.seekg(buf.tellg() - std::streampos(1));
-	return;
-}
-
-void CursorBack(std::string token) {
-	buf.seekg(buf.tellg() - std::streampos(token.size()));
 	return;
 }
 
@@ -316,7 +307,7 @@ void PrintMemory() {
 	std::cout << "Hash table size = " << HASH_TABLE_SIZE << std::endl;
 	std::cout << "Hash table = " << std::endl;
 	std::cout << ROW_DELIM(ROW_WIDTH) << std::endl;
-	for (int i = 1; i < HASH_TABLE_SIZE; ++i) {\
+	for (int i = 1; i < HASH_TABLE_SIZE; ++i) {
 		if (hash_table[i].symbol != std::string()) {
 			std::cout << COL_DELIM << CENTER_ALIGN_INT(i, INDEX_WIDTH) << COL_DELIM;
 			std::cout << Symbol::StringOfSymbol(hash_table[i]) << COL_DELIM << std::endl;
@@ -455,15 +446,7 @@ bool StructureTest(int hash1, int hash2) {
 
 int Evaluate(int root);
 
-void Substitute(int parameter_list, int argument_list) {
-	if (parameter_list < NIL) {
-		runtime_error.Mark("WARNING: unexpected error, parameter list is a symbol");
-		return;
-	}
-	if (argument_list < NIL) {
-		runtime_error.Mark("WARNING: unexpected error, argument list is a symbol");
-		return;
-	}
+void Substitute(int parameter_list, int argument_list, int& number_of_param) {
 	if (parameter_list == NIL) {
 		if (argument_list == NIL) return;
 		runtime_error.Mark("The number of arguments is greater than the number of parameters");
@@ -487,17 +470,26 @@ void Substitute(int parameter_list, int argument_list) {
 		return;
 	}
 	function_stack.Push(Pair(parameter, hash_table[-parameter].value));
-	hash_table[-parameter].value = Evaluate(memory_table[argument_list].lchild);
-	Substitute(memory_table[parameter_list].rchild, memory_table[argument_list].rchild);
+	hash_table[-parameter].value = memory_table[argument_list].lchild;
+	++number_of_param;
+	Substitute(memory_table[parameter_list].rchild, memory_table[argument_list].rchild, number_of_param);
 	return;
 }
 
-void Unsubstitute() {
-	while (!function_stack.Empty()) {
+void Unsubstitute(int number_of_param) {
+	for (int i = 0; i < number_of_param; ++i) {
 		Pair pair = function_stack.Pop();
 		hash_table[-pair.hash].value = pair.value;
 	}
 	return;
+}
+
+int EvaluateArgumentList(int argument_list) {
+	if (argument_list == NIL) return NIL;
+	int list = Alloc();
+	memory_table[list].lchild = Evaluate(memory_table[argument_list].lchild);
+	memory_table[list].rchild = EvaluateArgumentList(memory_table[argument_list].rchild);
+	return list;
 }
 
 int Evaluate(int root) {
@@ -510,24 +502,25 @@ int Evaluate(int root) {
 	// command
 	int function_hash = Evaluate(memory_table[root].lchild);
 	if (function_hash > NIL) {
-		if (-memory_table[function_hash].lchild != LAMBDA) {
+		if (memory_table[function_hash].lchild != -LAMBDA) {
 			runtime_error.Mark("You tried to call a list as a function");
 			return NIL;
 		}
-		function_hash = Evaluate(function_hash);
-		int parameter_list = memory_table[memory_table[function_hash].rchild].lchild;
-		int argument_list = memory_table[root].rchild;
-		Substitute(parameter_list, argument_list);
+		function_hash = Evaluate(function_hash); // to check whether it fits the criteria of LAMBDA function
+		if (runtime_error.occur) return NIL;
+		int evaluated_argument_list = EvaluateArgumentList(memory_table[root].rchild);
+		int number_of_param = 0;
+		Substitute(memory_table[memory_table[function_hash].rchild].lchild, evaluated_argument_list, number_of_param);
 		if (runtime_error.occur) {
-			Unsubstitute();
+			Unsubstitute(number_of_param);
 			return NIL;
 		}
 		int result = Evaluate(memory_table[memory_table[memory_table[function_hash].rchild].rchild].lchild);
-		Unsubstitute();
+		Unsubstitute(number_of_param);
 		return result;
 	}
-	if (-function_hash == DEFINE) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -DEFINE) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for DEFINE but more than 2 arguments were passed");
 			return NIL;
 		}
@@ -547,26 +540,26 @@ int Evaluate(int root) {
 		hash_table[-arg_hash].value = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 		return hash_table[-arg_hash].value;
 	}
-	if (-function_hash == LAMBDA) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -LAMBDA) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for LAMBDA but more than 2 arguments were passed");
 			return NIL;
 		}
 		if (memory_table[memory_table[root].rchild].lchild < NIL) {
-			runtime_error.Mark("A symbol is not allowed for the parameter to a LAMBDA function");
+			runtime_error.Mark("A list of arguments should be passed to a LAMBDA function");
 			return NIL;
 		}
 		return root;
 	}
-	if (-function_hash == QUOTE) {
-		if (memory_table[memory_table[root].rchild].rchild != NIL) {
+	if (function_hash == -QUOTE) {
+		if (memory_table[memory_table[root].rchild].rchild > NIL) {
 			runtime_error.Mark("1 argument is expected for QUOTE but more than 1 argument were passed");
 			return NIL;
 		}
 		return memory_table[memory_table[root].rchild].lchild;
 	}
-	if (-function_hash == PLUS) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -PLUS) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for PLUS but more than 2 arguments were passed");
 			return NIL;
 		}
@@ -587,8 +580,8 @@ int Evaluate(int root) {
 		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) + std::stoi(arg2_symbol)));
 		return GetHashValue(std::to_string(std::stod(arg1_symbol) + std::stod(arg2_symbol)));
 	}
-	if (-function_hash == MINUS) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -MINUS) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for MINUS but more than 2 arguments were passed");
 			return NIL;
 		}
@@ -609,8 +602,8 @@ int Evaluate(int root) {
 		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) - std::stoi(arg2_symbol)));
 		return GetHashValue(std::to_string(std::stod(arg1_symbol) - std::stod(arg2_symbol)));
 	}
-	if (-function_hash == TIMES) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -TIMES) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for TIMES but more than 2 arguments were passed");
 			return NIL;
 		}
@@ -631,8 +624,8 @@ int Evaluate(int root) {
 		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) * std::stoi(arg2_symbol)));
 		return GetHashValue(std::to_string(std::stod(arg1_symbol) * std::stod(arg2_symbol)));
 	}
-	if (-function_hash == DIVIDE) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -DIVIDE) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for DIVIDE but more than 2 arguments were passed");
 			return NIL;
 		}
@@ -657,32 +650,32 @@ int Evaluate(int root) {
 		if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) / std::stoi(arg2_symbol)));
 		return GetHashValue(std::to_string(std::stod(arg1_symbol) / std::stod(arg2_symbol)));
 	}
-	if (-function_hash == CAR) {
-		if (memory_table[memory_table[root].rchild].rchild != NIL) {
+	if (function_hash == -CAR) {
+		if (memory_table[memory_table[root].rchild].rchild > NIL) {
 			runtime_error.Mark("1 argument is expected for CAR but more than 1 argument were passed");
 			return NIL;
 		}
 		int arg_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
 		if (arg_hash <= NIL) {
-			runtime_error.Mark("The argument to CAR is not a list");
+			runtime_error.Mark("The argument to CAR is not the correct type");
 			return NIL;
 		}
 		return memory_table[arg_hash].lchild;
 	}
-	if (-function_hash == CDR) {
-		if (memory_table[memory_table[root].rchild].rchild != NIL) {
+	if (function_hash == -CDR) {
+		if (memory_table[memory_table[root].rchild].rchild > NIL) {
 			runtime_error.Mark("1 argument is expected for CDR but more than 1 argument were passed");
 			return NIL;
 		}
 		int arg_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
 		if (arg_hash <= NIL) {
-			runtime_error.Mark("The argument to CDR is not a list");
+			runtime_error.Mark("The argument to CDR is not the correct type");
 			return NIL;
 		}
 		return memory_table[arg_hash].rchild;
 	}
-	if (-function_hash == CONS) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -CONS) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for CONS but more than 2 arguments were passed");
 			return NIL;
 		}
@@ -697,84 +690,94 @@ int Evaluate(int root) {
 		memory_table[list].rchild = arg2_hash;
 		return list;
 	}
-	if (-function_hash == IF) {
-		if (memory_table[memory_table[memory_table[memory_table[root].rchild].rchild].rchild].rchild != NIL) {
+	if (function_hash == -IF) {
+		if (memory_table[memory_table[memory_table[memory_table[root].rchild].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("3 arguments are expected for IF but more than 3 argument were passed");
 			return NIL;
 		}
-		if (-Evaluate(memory_table[memory_table[root].rchild].lchild) == TRUE) return Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
-		else if (-Evaluate(memory_table[memory_table[root].rchild].lchild) == FALSE) return Evaluate(memory_table[memory_table[memory_table[memory_table[root].rchild].rchild].rchild].lchild);
+		int predicate = Evaluate(memory_table[memory_table[root].rchild].lchild);
+		if (predicate == -TRUE) return Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
+		else if (predicate == -FALSE) return Evaluate(memory_table[memory_table[memory_table[memory_table[root].rchild].rchild].rchild].lchild);
 		else {
 			runtime_error.Mark("Predicate of IF does not evaluate to boolean value");
 			return NIL;
 		}
 	}
-	if (-function_hash == COND) {
+	if (function_hash == -COND) {
 		if (memory_table[root].rchild == NIL) {
 			runtime_error.Mark("There is no argument to COND");
 			return NIL;
 		}
-		while (memory_table[memory_table[root].rchild].rchild != NIL) {
+		while (memory_table[memory_table[root].rchild].rchild > NIL) {
 			root = memory_table[root].rchild;
-			if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild != NIL) {
-				runtime_error.Mark("2 elements are expected for a list of predicate and value but more than 2 elements were passed");
+			if (memory_table[root].lchild <= NIL) {
+				runtime_error.Mark("Undesired syntax for COND statement");
 				return NIL;
 			}
-			if (-Evaluate(memory_table[memory_table[root].lchild].lchild) == TRUE) return Evaluate(memory_table[memory_table[memory_table[root].lchild].rchild].lchild);
+			if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild > NIL) {
+				runtime_error.Mark("2 elements are expected for a pair of predicate and value but more than 2 elements were passed");
+				return NIL;
+			}
+			if (Evaluate(memory_table[memory_table[root].lchild].lchild) == -TRUE) return Evaluate(memory_table[memory_table[memory_table[root].lchild].rchild].lchild);
 		}
 		root = memory_table[root].rchild;
-		if (-memory_table[memory_table[root].lchild].lchild != ELSE) {
+		if (memory_table[root].lchild <= NIL) {
+			runtime_error.Mark("Undesired syntax for COND statement");
+			return NIL;
+		}
+		if (memory_table[memory_table[root].lchild].lchild != -ELSE) {
 			runtime_error.Mark("There is no else statement to COND");
 			return NIL;
 		}
-		if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild != NIL) {
-			runtime_error.Mark("2 elements are expected for a list of predicate and value but more than 2 elements were passed");
+		if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild > NIL) {
+			runtime_error.Mark("2 elements are expected for a pair of predicate and value but more than 2 elements were passed");
 			return NIL;
 		}
 		return Evaluate(memory_table[memory_table[memory_table[root].lchild].rchild].lchild);
 	}
-	if (-function_hash == isNULL) {
-		if (memory_table[memory_table[root].rchild].rchild != NIL) {
+	if (function_hash == -isNULL) {
+		if (memory_table[memory_table[root].rchild].rchild > NIL) {
 			runtime_error.Mark("1 argument is expected for isNULL but more than 1 argument were passed");
 			return NIL;
 		}
 		if (Evaluate(memory_table[memory_table[root].rchild].lchild) == NIL) return -TRUE;
 		else return -FALSE;
 	}
-	if (-function_hash == isEQ) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -isEQ) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for isEQ but more than 2 arguments were passed");
 			return NIL;
 		}
 		if (Evaluate(memory_table[memory_table[root].rchild].lchild) == Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild)) return -TRUE;
 		else return -FALSE;
 	}
-	if (-function_hash == isEQUAL) {
-		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild != NIL) {
+	if (function_hash == -isEQUAL) {
+		if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > NIL) {
 			runtime_error.Mark("2 arguments are expected for isEQUAL but more than 2 arguments were passed");
 			return NIL;
 		}
 		if (StructureTest(Evaluate(memory_table[memory_table[root].rchild].lchild), Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild))) return -TRUE;
 		else return -FALSE;
 	}
-	if (-function_hash == isNUMBER) {
-		if (memory_table[memory_table[root].rchild].rchild != NIL) {
+	if (function_hash == -isNUMBER) {
+		if (memory_table[memory_table[root].rchild].rchild > NIL) {
 			runtime_error.Mark("1 argument is expected for isNUMBER but more than 1 argument were passed");
 			return NIL;
 		}
 		int arg_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
-		if (arg_hash > 0) return -FALSE;
-		if (IsNumber(hash_table[-arg_hash].symbol) == 0) return -FALSE;
-		else return -TRUE;
+		if (arg_hash > NIL) return -FALSE;
+		if (IsNumber(hash_table[-arg_hash].symbol)) return -TRUE;
+		else return -FALSE;
 	}
-	if (-function_hash == isSYMBOL) {
-		if (memory_table[memory_table[root].rchild].rchild != NIL) {
+	if (function_hash == -isSYMBOL) {
+		if (memory_table[memory_table[root].rchild].rchild > NIL) {
 			runtime_error.Mark("1 argument is expected for isSYMBOL but more than 1 argument were passed");
 			return NIL;
 		}
 		int arg_hash = Evaluate(memory_table[memory_table[root].rchild].lchild);
-		if (arg_hash >= 0) return -FALSE;
-		if (IsNumber(hash_table[-arg_hash].symbol) != 0) return -FALSE;
+		if (arg_hash > NIL) return -FALSE;
+		if (-arg_hash < NUM_OF_SPECIAL_SYMBOL) return -FALSE;
+		if (IsNumber(hash_table[-arg_hash].symbol)) return -FALSE;
 		else return -TRUE;
 	}
 	runtime_error.Mark("You tried to call a symbol as a function");
@@ -787,6 +790,7 @@ int main() {
 	while (true) {
 		ReadLine();
 		buf.str(Preprocess());
+		buf.clear();
 
 		int root = Read();
 		if (runtime_error.occur) {
