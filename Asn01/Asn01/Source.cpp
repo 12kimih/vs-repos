@@ -201,8 +201,13 @@ const int HashFunction(std::string str) {
 	return NUM_OF_SPECIAL_SYMBOL + sum % (HASH_TABLE_SIZE - NUM_OF_SPECIAL_SYMBOL);
 }
 
+int IsNumber(std::string token);
+
 int GetHashValue(std::string str) {
 	for (int i = 0; i < NUM_OF_SPECIAL_SYMBOL; ++i) if (str == special_symbol[i]) return -i;
+	if (IsNumber(str) == 0);
+	else if (IsNumber(str) == 1) str = std::to_string(std::stoi(str));
+	else str = std::to_string(std::stod(str));
 	int str_hash = HashFunction(str);
 	for (; !hash_table[str_hash].symbol.empty() && hash_table[str_hash].symbol != str; ) {
 		if (str_hash < HASH_TABLE_SIZE - 1) ++str_hash;
