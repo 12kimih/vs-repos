@@ -118,7 +118,7 @@ int IsNumber(std::string str) {
 	return 0;
 }
 
-void PrintState(const std::stringstream& buf) {
+void PrintState(std::stringstream& buf) {
 	std::cout << "state:" << std::endl;
 	if (buf.good()) {
 		std::cout << "goodbit" << std::endl;
@@ -136,11 +136,41 @@ void PrintState(const std::stringstream& buf) {
 	return;
 }
 
+void PrintStringstream(std::stringstream& buf) {
+	PrintState(buf);
+	std::cout << "tellg(): " << buf.tellg() << std::endl;
+	std::cout << "tellp(): " << buf.tellp() << std::endl;
+	std::string temp(buf.str());
+	std::cout << "----------------------" << std::endl;
+	for (int i = 0; i < temp.size(); ++i) std::cout << temp.at(i) << std::endl;
+	std::cout << "----------------------" << std::endl;
+	return;
+}
+
 int main() {
 	while (true) {
-		std::string buffer;
-		getline(std::cin, buffer);
-		std::cout << IsNumber(buffer) << std::endl << std::endl;
+		std::string temp;
+		std::getline(std::cin, temp);
+		std::stringstream buf1;
+		std::stringstream buf2;
+		std::string temp2;
+
+		buf1.str(temp + std::string(" "));
+		std::cout << "===============buf1==================" << std::endl;
+		PrintStringstream(buf1);
+
+		buf2.str(temp);
+		buf2 << ' ';
+		std::cout << "===============buf2==================" << std::endl;
+		PrintStringstream(buf2);
+		buf2 >> temp2;
+		std::cout << temp2 << std::endl;
+		PrintStringstream(buf2);
+		buf2 << "strong guy";
+		PrintStringstream(buf2);
+		buf2.str(temp);
+		buf2.clear();
+		PrintStringstream(buf2);
 	}
 	return 0;
 }
