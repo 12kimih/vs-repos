@@ -1,7 +1,7 @@
 /*
 TODO
-1. runtime_error to try-throw-catch system
-2. separate boolean values from pre-defined keywords
+1. separate boolean values from pre-defined keywords
+2. ensure evaluation table's free list is arranged in a ascending order
 */
 #include <iostream>
 #include <string>
@@ -9,24 +9,18 @@ TODO
 #include <exception>
 #include <stdexcept>
 
-class UserDefinedException {
+class ReadError : public std::runtime_error {
 public:
-	bool occur;
-	std::stringstream message;
-	UserDefinedException() : occur(false), message() {}
-	void Clear() {
-		occur = false;
-		message.str(std::string());
-		return;
-	}
-	void Mark(std::string str) {
-		occur = true;
-		message << str << std::endl;
-		return;
-	}
+	ReadError(std::string msg) : runtime_error(msg) {}
 };
-UserDefinedException runtime_error;
-
+class EvaluationError : public std::runtime_error {
+public:
+	EvaluationError(std::string msg) : runtime_error(msg) {}
+};
+class StackError : public std::runtime_error {
+public:
+	StackError(std::string msg) : runtime_error(msg) {}
+};
 class GarbageCollection : public std::exception {
 public:
 	GarbageCollection() : std::exception() {}
@@ -94,6 +88,7 @@ public:
 	const T& operator[](int index) const {
 		return stack[index];
 	}
+
 	bool Empty() {
 		if (top == -1) return true;
 		else return false;
@@ -111,10 +106,7 @@ public:
 		return;
 	}
 	T Pop() {
-		if (top == -1) {
-			runtime_error.Mark("WARNING: stack underflow");
-			return T();
-		}
+		if (top == -1) throw StackError("stack underflow");
 		return stack[top--];
 	}
 	void Clear() {
@@ -338,14 +330,14 @@ public:
 	MemoryTable memory_table;
 	HashTable hash_table;
 	std::stringstream buffer;
-	Stack<int> command_stack;
+	// Stack<int> command_stack;
 	Stack<Pair> function_stack;
 	MemoryTable evaluation_table;
 	Interpreter(int memory_table_size = 30, int hash_table_size = NUM_OF_SPECIAL_SYMBOL + 997) :
 		memory_table(MemoryTable(memory_table_size)),
 		hash_table(HashTable(hash_table_size)),
 		buffer(std::stringstream()),
-		command_stack(Stack<int>()),
+		// command_stack(Stack<int>()),
 		function_stack(Stack<Pair>()),
 		evaluation_table(MemoryTable()) {}
 	~Interpreter() {}
@@ -373,13 +365,16 @@ public:
 	}
 
 	int Allocate() {
-		if (memory_table.free_list == NIL) GarbageCollect();
 		if (memory_table.free_list == NIL) {
-			MemoryTable doubled_table(2 * memory_table.size);
-			for (int i = 0; i < memory_table.size; ++i) doubled_table[i] = memory_table[i];
-			for (int i = memory_table.size; i < 2 * memory_table.size - 1; ++i) doubled_table[i].rchild = i + 1;
-			memory_table.free_list = memory_table.size;
-			memory_table = std::move(doubled_table);
+			GarbageCollect();
+			if (memory_table.free_list == NIL) {
+				MemoryTable doubled_table(2 * memory_table.size);
+				for (int i = 0; i < memory_table.size; ++i) doubled_table[i] = memory_table[i];
+				for (int i = memory_table.size; i < 2 * memory_table.size - 1; ++i) doubled_table[i].rchild = i + 1;
+				memory_table.free_list = memory_table.size;
+				memory_table = std::move(doubled_table);
+			}
+			else throw GarbageCollection();
 		}
 		int temp = memory_table.free_list;
 		memory_table.free_list = memory_table[temp].rchild;
@@ -391,7 +386,7 @@ public:
 		for (int i = 1; i < memory_table.size; ++i) memory_table[i].flag = false;
 		for (int i = 0; i < hash_table.size; ++i) MarkFlag(hash_table[i].link);
 		for (int i = 0; i <= function_stack.top; ++i) MarkFlag(function_stack[i].link);
-		for (int i = 0; i <= command_stack.top; ++i) MarkFlag(command_stack[i]);
+		// for (int i = 0; i <= command_stack.top; ++i) MarkFlag(command_stack[i]);
 		for (int i = memory_table.size - 1; i > 0; --i) {
 			if (!memory_table[i].flag) {
 				memory_table[i].lchild = NIL;
@@ -399,7 +394,6 @@ public:
 				memory_table.free_list = i;
 			}
 		}
-		throw GarbageCollection();
 		return;
 	}
 	void MarkFlag(int root) {
@@ -431,22 +425,15 @@ public:
 		memory_table.free_list = root;
 		return;
 	}
-	/*
-	// Top-down deallocation
-	void Deallocate(int root) {
-		if (root <= 0) return;
-		while (root != NIL) {
-			int lchild = memory_table[root].lchild;
-			int rchild = memory_table[root].rchild;
-			memory_table[root].lchild = NIL;
-			memory_table[root].rchild = free_list;
-			free_list = root;
-			Deallocate(lchild);
-			root = rchild;
+	// Bottom-up deallocation
+	void DeallocateEvaluationTable() {
+		for (int i = evaluation_table.free_list - 1; i > 0; --i) {
+			evaluation_table[i].lchild = NIL;
+			evaluation_table[i].rchild = evaluation_table.free_list;
+			evaluation_table.free_list = i;
 		}
 		return;
 	}
-	*/
 	// Bottom-up deallocation
 	void DeallocateEvaluationTable(int root) {
 		if (root <= 0) return;
@@ -527,10 +514,7 @@ public:
 			if (token_hash != -LEFT_PAREN) return token_hash;
 		}
 		token_hash = GetHashValue(GetNextToken());
-		if (token_hash == 0) {
-			runtime_error.Mark("The number of left and right parentheses does not match");
-			return NIL;
-		}
+		if (token_hash == 0) throw ReadError("The number of left and right parentheses does not match");
 		if (token_hash == -RIGHT_PAREN) return NIL;
 		int root = Allocate();
 		// command_stack.Push(root);
@@ -570,203 +554,117 @@ public:
 		}
 		int function_link = Evaluate(memory_table[root].lchild);
 		if (function_link > 0) {
-			if (memory_table[function_link].lchild != -LAMBDA) {
-				runtime_error.Mark("You tried to call a list as a function");
-				return NIL;
-			}
+			if (memory_table[function_link].lchild != -LAMBDA) throw EvaluationError("You tried to call a list as a function");
 			function_link = Evaluate(function_link); // to check whether it fits the criteria of LAMBDA function
-			if (runtime_error.occur) return NIL;
 			int evaluated_argument_list = EvaluateArgumentList(memory_table[root].rchild);
 			int number_of_param = 0;
 			Substitute(memory_table[memory_table[function_link].rchild].lchild, evaluated_argument_list, number_of_param);
 			DeallocateEvaluationTable(evaluated_argument_list);
-			if (runtime_error.occur) {
-				Unsubstitute(number_of_param);
-				return NIL;
-			}
 			int result = Evaluate(memory_table[memory_table[memory_table[function_link].rchild].rchild].lchild);
 			Unsubstitute(number_of_param);
 			return result;
 		}
 		if (function_link == -QUOTE) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for QUOTE but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for QUOTE but more than 1 argument were passed");
 			return memory_table[memory_table[root].rchild].lchild;
 		}
 		if (function_link == -DEFINE) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for DEFINE but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for DEFINE but more than 2 arguments were passed");
 			int arg_hash = memory_table[memory_table[root].rchild].lchild;
-			if (arg_hash > 0) {
-				runtime_error.Mark("You tried to define a list which is not a symbol");
-				return NIL;
-			}
-			if (-arg_hash < NUM_OF_SPECIAL_SYMBOL) {
-				runtime_error.Mark("You tried to define a pre-defined keyword");
-				return NIL;
-			}
-			if (IsNumber(hash_table[-arg_hash].symbol)) {
-				runtime_error.Mark("You tried to define a number");
-				return NIL;
-			}
+			if (arg_hash > 0) throw EvaluationError("You tried to define a list which is not a symbol");
+			if (-arg_hash < NUM_OF_SPECIAL_SYMBOL) throw EvaluationError("You tried to define a pre-defined keyword");
+			if (IsNumber(hash_table[-arg_hash].symbol)) throw EvaluationError("You tried to define a number");
 			hash_table[-arg_hash].link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 			return arg_hash;
 		}
 		if (function_link == -LAMBDA) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for LAMBDA but more than 2 arguments were passed");
-				return NIL;
-			}
-			if (memory_table[memory_table[root].rchild].lchild < 0) {
-				runtime_error.Mark("A list of arguments should be passed to a LAMBDA function");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for LAMBDA but more than 2 arguments were passed");
+			if (memory_table[memory_table[root].rchild].lchild < 0) throw EvaluationError("A list of arguments should be passed to a LAMBDA function");
 			return root;
 		}
 		if (function_link == -LIST) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for LIST but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for LIST but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			int root = Allocate();
-			command_stack.Push(root);
+			// command_stack.Push(root);
 			memory_table[root].lchild = arg_link;
 			memory_table[root].rchild = NIL;
 			return root;
 		}
 		if (function_link == -PLUS) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for PLUS but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for PLUS but more than 2 arguments were passed");
 			int arg1_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			int arg2_link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
-			if (arg1_link > 0 || arg2_link > 0) {
-				runtime_error.Mark("You tried to add a list which is not a number");
-				return NIL;
-			}
+			if (arg1_link > 0 || arg2_link > 0) throw EvaluationError("You tried to add a list which is not a number");
 			std::string arg1_symbol = hash_table[-arg1_link].symbol;
 			std::string arg2_symbol = hash_table[-arg2_link].symbol;
 			int arg1_isnum = IsNumber(arg1_symbol);
 			int arg2_isnum = IsNumber(arg2_symbol);
-			if (!arg1_isnum || !arg2_isnum) {
-				runtime_error.Mark("You tried to add a non-numeric variable");
-				return NIL;
-			}
+			if (!arg1_isnum || !arg2_isnum) throw EvaluationError("You tried to add a non-numeric variable");
 			if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) + std::stoi(arg2_symbol)));
 			return GetHashValue(std::to_string(std::stod(arg1_symbol) + std::stod(arg2_symbol)));
 		}
 		if (function_link == -MINUS) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for MINUS but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for MINUS but more than 2 arguments were passed");
 			int arg1_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			int arg2_link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
-			if (arg1_link > 0 || arg2_link > 0) {
-				runtime_error.Mark("You tried to subtract a list which is not a number");
-				return NIL;
-			}
+			if (arg1_link > 0 || arg2_link > 0) throw EvaluationError("You tried to subtract a list which is not a number");
 			std::string arg1_symbol = hash_table[-arg1_link].symbol;
 			std::string arg2_symbol = hash_table[-arg2_link].symbol;
 			int arg1_isnum = IsNumber(arg1_symbol);
 			int arg2_isnum = IsNumber(arg2_symbol);
-			if (!arg1_isnum || !arg2_isnum) {
-				runtime_error.Mark("You tried to subtract a non-numeric variable");
-				return NIL;
-			}
+			if (!arg1_isnum || !arg2_isnum) throw EvaluationError("You tried to subtract a non-numeric variable");
 			if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) - std::stoi(arg2_symbol)));
 			return GetHashValue(std::to_string(std::stod(arg1_symbol) - std::stod(arg2_symbol)));
 		}
 		if (function_link == -TIMES) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for TIMES but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for TIMES but more than 2 arguments were passed");
 			int arg1_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			int arg2_link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
-			if (arg1_link > 0 || arg2_link > 0) {
-				runtime_error.Mark("You tried to multiply a list which is not a number");
-				return NIL;
-			}
+			if (arg1_link > 0 || arg2_link > 0) throw EvaluationError("You tried to multiply a list which is not a number");
 			std::string arg1_symbol = hash_table[-arg1_link].symbol;
 			std::string arg2_symbol = hash_table[-arg2_link].symbol;
 			int arg1_isnum = IsNumber(arg1_symbol);
 			int arg2_isnum = IsNumber(arg2_symbol);
-			if (!arg1_isnum || !arg2_isnum) {
-				runtime_error.Mark("You tried to multiply a non-numeric variable");
-				return NIL;
-			}
+			if (!arg1_isnum || !arg2_isnum) throw EvaluationError("You tried to multiply a non-numeric variable");
 			if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) * std::stoi(arg2_symbol)));
 			return GetHashValue(std::to_string(std::stod(arg1_symbol) * std::stod(arg2_symbol)));
 		}
 		if (function_link == -DIVIDE) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for DIVIDE but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for DIVIDE but more than 2 arguments were passed");
 			int arg1_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			int arg2_link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
-			if (arg1_link > 0 || arg2_link > 0) {
-				runtime_error.Mark("You tried to divide (by) a list which is not a number");
-				return NIL;
-			}
+			if (arg1_link > 0 || arg2_link > 0) throw EvaluationError("You tried to divide (by) a list which is not a number");
 			std::string arg1_symbol = hash_table[-arg1_link].symbol;
 			std::string arg2_symbol = hash_table[-arg2_link].symbol;
 			int arg1_isnum = IsNumber(arg1_symbol);
 			int arg2_isnum = IsNumber(arg2_symbol);
-			if (!arg1_isnum || !arg2_isnum) {
-				runtime_error.Mark("You tried to divide (by) a non-numeric variable");
-				return NIL;
-			}
-			if (std::stod(arg2_symbol) == 0.0) {
-				runtime_error.Mark("You tried to divide by zero");
-				return NIL;
-			}
+			if (!arg1_isnum || !arg2_isnum) throw EvaluationError("You tried to divide (by) a non-numeric variable");
+			if (std::stod(arg2_symbol) == 0.0) throw EvaluationError("You tried to divide by zero");
 			if (arg1_isnum == 1 && arg2_isnum == 1) return GetHashValue(std::to_string(std::stoi(arg1_symbol) / std::stoi(arg2_symbol)));
 			return GetHashValue(std::to_string(std::stod(arg1_symbol) / std::stod(arg2_symbol)));
 		}
 		if (function_link == -NOT) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for NOT but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for NOT but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			if (arg_link == -TRUE) return -FALSE;
 			else if (arg_link == -FALSE) return -TRUE;
-			else {
-				runtime_error.Mark("TYPE ERROR: The argument passed to NOT is not a boolean value");
-				return NIL;
-			}
+			else throw EvaluationError("TYPE ERROR: The argument passed to NOT is not a boolean value");
 		}
 		if (function_link == -isNULL) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for isNULL but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for isNULL but more than 1 argument were passed");
 			if (Evaluate(memory_table[memory_table[root].rchild].lchild) == NIL) return -TRUE;
 			return -FALSE;
 		}
 		if (function_link == -isNUMBER) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for isNUMBER but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for isNUMBER but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			if (arg_link > 0) return -FALSE;
 			if (IsNumber(hash_table[-arg_link].symbol)) return -TRUE;
 			return -FALSE;
 		}
 		if (function_link == -isSYMBOL) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for isSYMBOL but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for isSYMBOL but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			if (arg_link > 0) return -FALSE;
 			if (-arg_link < NUM_OF_SPECIAL_SYMBOL) return -FALSE;
@@ -774,119 +672,67 @@ public:
 			return -TRUE;
 		}
 		if (function_link == -isPAIR) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for isPAIR but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for isPAIR but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			if (arg_link <= 0) return -FALSE;
 			if (memory_table[arg_link].lchild == -LAMBDA) return -FALSE;
 			return -TRUE;
 		}
 		if (function_link == -isEQ) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for isEQ but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for isEQ but more than 2 arguments were passed");
 			if (Evaluate(memory_table[memory_table[root].rchild].lchild) == Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild)) return -TRUE;
 			return -FALSE;
 		}
 		if (function_link == -isEQUAL) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for isEQUAL but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for isEQUAL but more than 2 arguments were passed");
 			if (StructureTest(Evaluate(memory_table[memory_table[root].rchild].lchild), Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild))) return -TRUE;
 			return -FALSE;
 		}
 		if (function_link == -IF) {
-			if (memory_table[memory_table[memory_table[memory_table[root].rchild].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("3 arguments are expected for IF but more than 3 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[memory_table[root].rchild].rchild].rchild].rchild > 0) throw EvaluationError("3 arguments are expected for IF but more than 3 argument were passed");
 			int predicate = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			if (predicate == -TRUE) return Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 			else if (predicate == -FALSE) return Evaluate(memory_table[memory_table[memory_table[memory_table[root].rchild].rchild].rchild].lchild);
-			else {
-				runtime_error.Mark("Predicate of IF does not evaluate to boolean value");
-				return NIL;
-			}
+			else throw EvaluationError("Predicate of IF does not evaluate to boolean value");
 		}
 		if (function_link == -COND) {
-			if (memory_table[root].rchild == NIL) {
-				runtime_error.Mark("There is no argument to COND");
-				return NIL;
-			}
+			if (memory_table[root].rchild == NIL) throw EvaluationError("There is no argument to COND");
 			while (memory_table[memory_table[root].rchild].rchild > 0) {
 				root = memory_table[root].rchild;
-				if (memory_table[root].lchild <= 0) {
-					runtime_error.Mark("Undesired syntax for COND statement");
-					return NIL;
-				}
-				if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild > 0) {
-					runtime_error.Mark("2 elements are expected for a pair of predicate and value but more than 2 elements were passed");
-					return NIL;
-				}
+				if (memory_table[root].lchild <= 0) throw EvaluationError("Undesired syntax for COND statement");
+				if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild > 0) throw EvaluationError("2 elements are expected for a pair of predicate and value but more than 2 elements were passed");
 				if (Evaluate(memory_table[memory_table[root].lchild].lchild) == -TRUE) return Evaluate(memory_table[memory_table[memory_table[root].lchild].rchild].lchild);
 			}
 			root = memory_table[root].rchild;
-			if (memory_table[root].lchild <= 0) {
-				runtime_error.Mark("Undesired syntax for COND statement");
-				return NIL;
-			}
-			if (memory_table[memory_table[root].lchild].lchild != -ELSE) {
-				runtime_error.Mark("There is no else statement to COND");
-				return NIL;
-			}
-			if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 elements are expected for a pair of predicate and value but more than 2 elements were passed");
-				return NIL;
-			}
+			if (memory_table[root].lchild <= 0) throw EvaluationError("Undesired syntax for COND statement");
+			if (memory_table[memory_table[root].lchild].lchild != -ELSE) throw EvaluationError("There is no else statement to COND");
+			if (memory_table[memory_table[memory_table[root].lchild].rchild].rchild > 0) throw EvaluationError("2 elements are expected for a pair of predicate and value but more than 2 elements were passed");
 			return Evaluate(memory_table[memory_table[memory_table[root].lchild].rchild].lchild);
 		}
 		if (function_link == -CAR) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for CAR but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for CAR but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
-			if (arg_link <= 0) {
-				runtime_error.Mark("The argument to CAR is not the correct type");
-				return NIL;
-			}
+			if (arg_link <= 0) throw EvaluationError("The argument to CAR is not the correct type");
 			return memory_table[arg_link].lchild;
 		}
 		if (function_link == -CDR) {
-			if (memory_table[memory_table[root].rchild].rchild > 0) {
-				runtime_error.Mark("1 argument is expected for CDR but more than 1 argument were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for CDR but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
-			if (arg_link <= 0) {
-				runtime_error.Mark("The argument to CDR is not the correct type");
-				return NIL;
-			}
+			if (arg_link <= 0) throw EvaluationError("The argument to CDR is not the correct type");
 			return memory_table[arg_link].rchild;
 		}
 		if (function_link == -CONS) {
-			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
-				runtime_error.Mark("2 arguments are expected for CONS but more than 2 arguments were passed");
-				return NIL;
-			}
+			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) throw EvaluationError("2 arguments are expected for CONS but more than 2 arguments were passed");
 			int arg1_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			int arg2_link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
-			if (arg2_link < 0) {
-				runtime_error.Mark("The second argument to CONS cannot be a symbol");
-				return NIL;
-			}
+			if (arg2_link < 0) throw EvaluationError("The second argument to CONS cannot be a symbol");
 			int root = Allocate();
-			command_stack.Push(root);
+			// command_stack.Push(root);
 			memory_table[root].lchild = arg1_link;
 			memory_table[root].rchild = arg2_link;
 			return root;
 		}
-		runtime_error.Mark("You tried to call a symbol as a function");
-		return NIL;
+		throw EvaluationError("You tried to call a symbol as a function");
 	}
 	bool StructureTest(int link1, int link2) {
 		if (link1 <= 0) {
@@ -915,30 +761,24 @@ public:
 	void Substitute(int parameter_list, int argument_list, int& number_of_param) {
 		if (parameter_list == NIL) {
 			if (argument_list == NIL) return;
-			runtime_error.Mark("The number of arguments is greater than the number of parameters");
-			return;
+			else throw EvaluationError("The number of arguments is greater than the number of parameters");
 		}
-		if (argument_list == NIL) {
-			runtime_error.Mark("The number of parameters is greater than the number of arguments");
-			return;
-		}
+		if (argument_list == NIL) throw EvaluationError("The number of parameters is greater than the number of arguments");
 		int parameter = memory_table[parameter_list].lchild;
-		if (parameter > 0) {
-			runtime_error.Mark("A list cannot be a parameter name");
-			return;
-		}
-		if (-parameter < NUM_OF_SPECIAL_SYMBOL) {
-			runtime_error.Mark("A pre-defined keyword cannot be a parameter name");
-			return;
-		}
-		if (IsNumber(hash_table[-parameter].symbol)) {
-			runtime_error.Mark("A number cannot be a parameter name");
-			return;
-		}
+		if (parameter > 0) throw EvaluationError("A list cannot be a parameter name");
+		if (-parameter < NUM_OF_SPECIAL_SYMBOL) throw EvaluationError("A pre-defined keyword cannot be a parameter name");
+		if (IsNumber(hash_table[-parameter].symbol)) throw EvaluationError("A number cannot be a parameter name");
 		function_stack.Push(Pair(parameter, hash_table[-parameter].link));
 		hash_table[-parameter].link = evaluation_table[argument_list].lchild;
 		++number_of_param;
 		Substitute(memory_table[parameter_list].rchild, evaluation_table[argument_list].rchild, number_of_param);
+		return;
+	}
+	void Unsubstitute() {
+		for (int i = 0; i <= function_stack.top; ++i) {
+			Pair pair = function_stack.Pop();
+			hash_table[-pair.hash].link = pair.link;
+		}
 		return;
 	}
 	void Unsubstitute(int number_of_param) {
@@ -1029,52 +869,28 @@ int main() {
 		while (true) {
 			try {
 				root = scheme.Read();
-				if (runtime_error.occur) {
-					std::cout << "] ";
-					scheme.memory_table.PrintFreeList();
-					scheme.PrintRootOfList(root);
-					std::cout << std::endl;
-					scheme.PrintMemory();
-
-					std::cout << "Preprocessd: " << std::endl;
-					std::cout << scheme.buffer.str() << std::endl << std::endl;
-					std::cout << "Command interpreted: " << std::endl;
-					std::cout << scheme.StringOfData(root) << std::endl << std::endl;
-					std::cout << "Command Stack: " << std::endl;
-					scheme.command_stack.Print();
-					scheme.command_stack.Clear();
-
-					std::cout << runtime_error.message.str() << std::endl;
-					scheme.Deallocate(root);
-					runtime_error.Clear();
-					continue;
-				}
-
 				result = scheme.Evaluate(root);
-				if (runtime_error.occur) {
-					std::cout << "] ";
-					scheme.memory_table.PrintFreeList();
-					scheme.PrintRootOfList(root);
-					std::cout << std::endl;
-					scheme.PrintMemory();
-
-					std::cout << "Preprocessd: " << std::endl;
-					std::cout << scheme.buffer.str() << std::endl << std::endl;
-					std::cout << "Command interpreted: " << std::endl;
-					std::cout << scheme.StringOfData(root) << std::endl << std::endl;
-					std::cout << "Command Stack: " << std::endl;
-					scheme.command_stack.Print();
-					scheme.command_stack.Clear();
-
-					std::cout << runtime_error.message.str() << std::endl;
-					scheme.Deallocate(root);
-					runtime_error.Clear();
-					continue;
-				}
+				// scheme.command_stack.Clear();
 				break;
 			}
-			catch (GarbageCollection& e) {
-				scheme.buffer.str(scheme.buffer.str());
+			catch (ReadError& e) {
+				std::cout << e.what() << std::endl;
+				// scheme.command_stack.Clear();
+				scheme.Deallocate(root);
+				break;
+			}
+			catch (EvaluationError& e) {
+				std::cout << e.what() << std::endl;
+				// scheme.command_stack.Clear();
+				scheme.Unsubstitute();
+				scheme.DeallocateEvaluationTable();
+				scheme.Deallocate(root);
+				break;
+			}
+			catch (GarbageCollection&) {
+				scheme.Unsubstitute();
+				scheme.DeallocateEvaluationTable();
+				scheme.buffer.seekg(0, std::ios_base::beg);
 				scheme.buffer.clear();
 				continue;
 			}
@@ -1086,16 +902,14 @@ int main() {
 		scheme.PrintRootOfList(root);
 		scheme.PrintMemory();
 
+		/*
 		std::cout << "Preprocessd: " << std::endl;
 		std::cout << scheme.buffer.str() << std::endl << std::endl;
-		std::cout << "Command interpreted: " << std::endl;
+		std::cout << "Command Interpreted: " << std::endl;
 		std::cout << scheme.StringOfData(root) << std::endl << std::endl;
 		std::cout << "Result: " << std::endl;
 		std::cout << scheme.StringOfData(result) << std::endl << std::endl;
-
-		std::cout << "Command Stack: " << std::endl;
-		scheme.command_stack.Print();
-		scheme.command_stack.Clear();
+		*/
 	}
 	return 0;
 }
