@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <sstream>
+#include <stdexcept>
 
 bool is_sorted_asc(int* arr, int size) {
 	for (int i = 0; i < size - 1; ++i) {
@@ -147,7 +148,29 @@ void PrintStringstream(std::stringstream& buf) {
 	return;
 }
 
+int quotient(int a, int b) {
+	if (b == 0) {
+		throw std::runtime_error("attempted to divide by zero");
+	}
+	return a / b;
+}
+
 int main() {
+	int num1, num2, res;
+
+	std::cout << "Enter two integers (EOF to end): " << std::endl;
+	while (std::cin >> num1 >> num2) {
+		try {
+			res = quotient(num1, num2);
+			std::cout << "The quotient is: " << res << std::endl;
+		}
+		catch (std::runtime_error& e) {
+			std::cout << "Exception occurred: " << e.what() << std::endl;
+		}
+		std::cout << "Enter two integers (EOF to end): " << std::endl;
+	}
+
+	/*
 	while (true) {
 		std::string temp;
 		std::getline(std::cin, temp);
@@ -172,5 +195,6 @@ int main() {
 		buf2.clear();
 		PrintStringstream(buf2);
 	}
+	*/
 	return 0;
 }

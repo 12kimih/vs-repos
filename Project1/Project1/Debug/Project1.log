@@ -1,3 +1,3 @@
 ﻿  Source.cpp
-C:\Users\Ik Hwan\source\repos\Project1\Project1\Source.cpp(145,20): warning C4018:  '<': signed/unsigned mismatch
+C:\Users\Ik Hwan\source\repos\Project1\Project1\Source.cpp(146,20): warning C4018:  '<': signed/unsigned mismatch
   Project1.vcxproj -> C:\Users\Ik Hwan\source\repos\Project1\Debug\Project1.exe
