@@ -6,6 +6,8 @@ TODO
 #include <iostream>
 #include <string>
 #include <sstream>
+#include <exception>
+#include <stdexcept>
 
 class UserDefinedException {
 public:
@@ -25,9 +27,15 @@ public:
 };
 UserDefinedException runtime_error;
 
+class GarbageCollection : public std::exception {
+public:
+	GarbageCollection() : std::exception() {}
+};
+
 const int WIDTH = 15;
 const int INDEX_WIDTH = 10;
-const int ROW_WIDTH = INDEX_WIDTH + 2 * WIDTH + 4;
+const int ROW_WIDTH_NODE = 4 * WIDTH + 5;
+const int ROW_WIDTH_SYMBOL = 3 * WIDTH + 4;
 const std::string NIL_SYMBOL = "NIL";
 const std::string ROW_DELIM(int width) {
 	std::string temp;
@@ -35,6 +43,18 @@ const std::string ROW_DELIM(int width) {
 	return temp;
 }
 const std::string COL_DELIM = "|";
+const std::string CENTER_ALIGN_BOOL(bool obj, int width) {
+	std::stringstream temp;
+	temp << obj;
+	std::string obj_str = temp.str();
+	if ((width - obj_str.size()) % 2 != 0) obj_str += " ";
+	int padding = (width - obj_str.size()) / 2;
+	temp.str(std::string());
+	for (int i = 0; i < padding; ++i) temp << ' ';
+	temp << obj_str;
+	for (int i = 0; i < padding; ++i) temp << ' ';
+	return temp.str();
+}
 const std::string CENTER_ALIGN_INT(int obj, int width) {
 	std::stringstream temp;
 	temp << obj;
@@ -111,23 +131,32 @@ class Node {
 public:
 	int lchild;
 	int rchild;
-	bool being_used;
-	Node() : lchild(0), rchild(0), being_used(false) {}
-	Node(const Node& ref) : lchild(ref.lchild), rchild(ref.rchild), being_used(ref.being_used) {}
+	bool flag;
+	Node() : lchild(0), rchild(0), flag(false) {}
+	Node(const Node& ref) : lchild(ref.lchild), rchild(ref.rchild), flag(ref.flag) {}
 	~Node() {}
 	Node& operator=(const Node& ref) {
 		lchild = ref.lchild;
 		rchild = ref.rchild;
-		being_used = ref.being_used;
+		flag = ref.flag;
 		return *this;
 	}
-	static std::string StringOfNode(const Node& entry) {
+	static std::string StringOfFields() {
 		std::stringstream temp;
-		if (entry.lchild == 0) temp << CENTER_ALIGN_STR(NIL_SYMBOL, WIDTH);
-		else temp << CENTER_ALIGN_INT(entry.lchild, WIDTH);
+		temp << CENTER_ALIGN_STR("left child", WIDTH);
 		temp << COL_DELIM;
-		if (entry.rchild == 0) temp << CENTER_ALIGN_STR(NIL_SYMBOL, WIDTH);
-		else temp << CENTER_ALIGN_INT(entry.rchild, WIDTH);
+		temp << CENTER_ALIGN_STR("right child", WIDTH);
+		temp << COL_DELIM;
+		temp << CENTER_ALIGN_STR("flag", WIDTH);
+		return temp.str();
+	}
+	std::string ToString() {
+		std::stringstream temp;
+		temp << CENTER_ALIGN_INT(lchild, WIDTH);
+		temp << COL_DELIM;
+		temp << CENTER_ALIGN_INT(rchild, WIDTH);
+		temp << COL_DELIM;
+		temp << CENTER_ALIGN_BOOL(flag, WIDTH);
 		return temp.str();
 	}
 };
@@ -143,12 +172,18 @@ public:
 		link = ref.link;
 		return *this;
 	}
-	static std::string StringOfSymbol(const Symbol& entry) {
+	static std::string StringOfFields() {
 		std::stringstream temp;
-		temp << CENTER_ALIGN_STR(entry.symbol, WIDTH);
+		temp << CENTER_ALIGN_STR("symbol", WIDTH);
 		temp << COL_DELIM;
-		if (entry.link == 0) temp << CENTER_ALIGN_STR(NIL_SYMBOL, WIDTH);
-		else temp << CENTER_ALIGN_INT(entry.link, WIDTH);
+		temp << CENTER_ALIGN_STR("link", WIDTH);
+		return temp.str();
+	}
+	std::string ToString() {
+		std::stringstream temp;
+		temp << CENTER_ALIGN_STR(symbol, WIDTH);
+		temp << COL_DELIM;
+		temp << CENTER_ALIGN_INT(link, WIDTH);
 		return temp.str();
 	}
 };
@@ -181,13 +216,17 @@ class MemoryTable {
 public:
 	Node* memory_table;
 	int size;
-	MemoryTable(int size = 30) : memory_table(new Node[size]), size(size) {}
-	MemoryTable(const MemoryTable& ref) : memory_table(new Node[ref.size]), size(ref.size) {
+	int free_list;
+	MemoryTable(int size = 30) : memory_table(new Node[size]), size(size), free_list(1) {
+		for (int i = 1; i < size - 1; ++i) memory_table[i].rchild = i + 1;
+	}
+	MemoryTable(const MemoryTable& ref) : memory_table(new Node[ref.size]), size(ref.size), free_list(ref.free_list) {
 		for (int i = 0; i < size; ++i) memory_table[i] = ref.memory_table[i];
 	}
-	MemoryTable(MemoryTable&& ref) noexcept : memory_table(ref.memory_table), size(ref.size) {
+	MemoryTable(MemoryTable&& ref) noexcept : memory_table(ref.memory_table), size(ref.size), free_list(ref.free_list) {
 		ref.memory_table = nullptr;
 		ref.size = 0;
+		ref.free_list = 0;
 	}
 	~MemoryTable() {
 		delete[] memory_table;
@@ -196,6 +235,7 @@ public:
 		delete[] memory_table;
 		memory_table = new Node[ref.size];
 		size = ref.size;
+		free_list = ref.free_list;
 		for (int i = 0; i < size; ++i) memory_table[i] = ref.memory_table[i];
 		return *this;
 	}
@@ -203,8 +243,10 @@ public:
 		delete[] memory_table;
 		memory_table = ref.memory_table;
 		size = ref.size;
+		free_list = ref.free_list;
 		ref.memory_table = nullptr;
 		ref.size = 0;
+		ref.free_list = 0;
 		return *this;
 	}
 	Node& operator[](int index) {
@@ -219,12 +261,20 @@ public:
 	const Node& at(int index) const {
 		return memory_table[index];
 	}
+
+	void PrintFreeList() {
+		std::cout << "Free list's root=" << free_list << std::endl;
+		return;
+	}
 };
 class HashTable {
 public:
 	Symbol* hash_table;
 	int size;
-	HashTable(int size = NUM_OF_SPECIAL_SYMBOL + 997) : hash_table(new Symbol[size]), size(size) {}
+	static std::string* special_symbol;
+	HashTable(int size = NUM_OF_SPECIAL_SYMBOL + 997) : hash_table(new Symbol[size]), size(size) {
+		for (int i = 0; i < NUM_OF_SPECIAL_SYMBOL; ++i) hash_table[i].symbol = special_symbol[i];
+	}
 	HashTable(const HashTable& ref) : hash_table(new Symbol[ref.size]), size(ref.size) {
 		for (int i = 0; i < size; ++i) hash_table[i] = ref.hash_table[i];
 	}
@@ -250,30 +300,6 @@ public:
 	const Symbol& at(int index) const {
 		return hash_table[index];
 	}
-};
-
-class Interpreter {
-public:
-	static std::string* special_symbol;
-	MemoryTable memory_table;
-	HashTable hash_table;
-	int free_list;
-	std::stringstream buffer;
-	Stack<Pair> function_stack;
-	Stack<int> command_stack;
-	Stack<int> evaluation_stack;
-	Interpreter(int memory_table_size = 30, int hash_table_size = NUM_OF_SPECIAL_SYMBOL + 997) :
-		memory_table(MemoryTable(memory_table_size)),
-		hash_table(HashTable(hash_table_size)),
-		free_list(1),
-		buffer(std::stringstream()),
-		function_stack(Stack<Pair>()),
-		command_stack(Stack<int>()),
-		evaluation_stack(Stack<int>()) {
-		for (int i = 1; i < memory_table.size - 1; ++i) memory_table[i].rchild = i + 1;
-		for (int i = 0; i < NUM_OF_SPECIAL_SYMBOL; ++i) hash_table[i].symbol = special_symbol[i];
-	}
-	~Interpreter() {}
 
 	static void InitializeSpecialSymbol() {
 		special_symbol[NIL] = std::string();
@@ -304,6 +330,26 @@ public:
 		special_symbol[CONS] = "cons";
 		return;
 	}
+};
+std::string* HashTable::special_symbol = new std::string[NUM_OF_SPECIAL_SYMBOL];
+
+class Interpreter {
+public:
+	MemoryTable memory_table;
+	HashTable hash_table;
+	std::stringstream buffer;
+	Stack<int> command_stack;
+	Stack<Pair> function_stack;
+	MemoryTable evaluation_table;
+	Interpreter(int memory_table_size = 30, int hash_table_size = NUM_OF_SPECIAL_SYMBOL + 997) :
+		memory_table(MemoryTable(memory_table_size)),
+		hash_table(HashTable(hash_table_size)),
+		buffer(std::stringstream()),
+		command_stack(Stack<int>()),
+		function_stack(Stack<Pair>()),
+		evaluation_table(MemoryTable()) {}
+	~Interpreter() {}
+
 	static void ASCIILower(std::string& str) {
 		for (auto iter = str.begin(); iter != str.end(); ++iter) {
 			if (*iter >= 'A' && *iter <= 'Z') {
@@ -327,39 +373,53 @@ public:
 	}
 
 	int Allocate() {
-		if (free_list == NIL) GarbageCollect();
-		if (free_list == NIL) {
+		if (memory_table.free_list == NIL) GarbageCollect();
+		if (memory_table.free_list == NIL) {
 			MemoryTable doubled_table(2 * memory_table.size);
 			for (int i = 0; i < memory_table.size; ++i) doubled_table[i] = memory_table[i];
 			for (int i = memory_table.size; i < 2 * memory_table.size - 1; ++i) doubled_table[i].rchild = i + 1;
-			free_list = memory_table.size;
+			memory_table.free_list = memory_table.size;
 			memory_table = std::move(doubled_table);
 		}
-		int temp = free_list;
-		free_list = memory_table[free_list].rchild;
+		int temp = memory_table.free_list;
+		memory_table.free_list = memory_table[temp].rchild;
+		memory_table[temp].rchild = NIL;
 		return temp;
 	}
 	void GarbageCollect() {
-		for (int i = 1; i < memory_table.size; ++i) memory_table[i].being_used = false;
-		for (int i = 0; i < hash_table.size; ++i) MarkBeingUsed(hash_table[i].link);
-		for (int i = 0; i <= function_stack.top; ++i) MarkBeingUsed(function_stack[i].link);
-		for (int i = 0; i <= command_stack.top; ++i) MarkBeingUsed(command_stack[i]);
-		for (int i = 0; i <= evaluation_stack.top; ++i) MarkBeingUsed(evaluation_stack[i]);
-		for (int i = 1; i < memory_table.size; ++i) {
-			if (!memory_table[i].being_used) {
+		std::cout << "----- garbage collecting -----" << std::endl;
+		for (int i = 1; i < memory_table.size; ++i) memory_table[i].flag = false;
+		for (int i = 0; i < hash_table.size; ++i) MarkFlag(hash_table[i].link);
+		for (int i = 0; i <= function_stack.top; ++i) MarkFlag(function_stack[i].link);
+		for (int i = 0; i <= command_stack.top; ++i) MarkFlag(command_stack[i]);
+		for (int i = memory_table.size - 1; i > 0; --i) {
+			if (!memory_table[i].flag) {
 				memory_table[i].lchild = NIL;
-				memory_table[i].rchild = free_list;
-				free_list = i;
+				memory_table[i].rchild = memory_table.free_list;
+				memory_table.free_list = i;
 			}
 		}
+		throw GarbageCollection();
 		return;
 	}
-	void MarkBeingUsed(int root) {
+	void MarkFlag(int root) {
 		if (root <= 0) return;
-		memory_table[root].being_used = true;
-		MarkBeingUsed(memory_table[root].lchild);
-		MarkBeingUsed(memory_table[root].rchild);
+		memory_table[root].flag = true;
+		MarkFlag(memory_table[root].lchild);
+		MarkFlag(memory_table[root].rchild);
 		return;
+	}
+	int AllocateEvaluationTable() {
+		if (evaluation_table.free_list == NIL) {
+			MemoryTable doubled_table(2 * evaluation_table.size);
+			for (int i = 0; i < evaluation_table.size; ++i) doubled_table[i] = evaluation_table[i];
+			for (int i = evaluation_table.size; i < 2 * evaluation_table.size - 1; ++i) doubled_table[i].rchild = i + 1;
+			evaluation_table.free_list = evaluation_table.size;
+			evaluation_table = std::move(doubled_table);
+		}
+		int temp = evaluation_table.free_list;
+		evaluation_table.free_list = evaluation_table[evaluation_table.free_list].rchild;
+		return temp;
 	}
 	// Bottom-up deallocation
 	void Deallocate(int root) {
@@ -367,8 +427,8 @@ public:
 		Deallocate(memory_table[root].rchild);
 		if (memory_table[root].lchild > 0) Deallocate(memory_table[root].lchild);
 		memory_table[root].lchild = NIL;
-		memory_table[root].rchild = free_list;
-		free_list = root;
+		memory_table[root].rchild = memory_table.free_list;
+		memory_table.free_list = root;
 		return;
 	}
 	/*
@@ -387,27 +447,13 @@ public:
 		return;
 	}
 	*/
-	/*
 	// Bottom-up deallocation
-	void DeallocateExceptLchild(int root) {
+	void DeallocateEvaluationTable(int root) {
 		if (root <= 0) return;
-		DeallocateExceptLchild(memory_table[root].rchild);
-		memory_table[root].lchild = NIL;
-		memory_table[root].rchild = free_list;
-		free_list = root;
-		return;
-	}
-	*/
-	// Top-down deallocation
-	void DeallocateExceptLchild(int root) {
-		if (root <= 0) return;
-		while (root != NIL) {
-			memory_table[root].lchild = NIL;
-			int temp = memory_table[root].rchild;
-			memory_table[root].rchild = free_list;
-			free_list = root;
-			root = temp;
-		}
+		DeallocateEvaluationTable(evaluation_table[root].rchild);
+		evaluation_table[root].lchild = NIL;
+		evaluation_table[root].rchild = evaluation_table.free_list;
+		evaluation_table.free_list = root;
 		return;
 	}
 
@@ -487,21 +533,21 @@ public:
 		}
 		if (token_hash == -RIGHT_PAREN) return NIL;
 		int root = Allocate();
-		command_stack.Push(root);
+		// command_stack.Push(root);
 		if (token_hash == -LEFT_PAREN) memory_table[root].lchild = Read(true);
 		else memory_table[root].lchild = token_hash;
 		memory_table[root].rchild = Read(true);
 		return root;
 	}
 	int GetHashValue(std::string str) {
-		for (int i = 0; i < NUM_OF_SPECIAL_SYMBOL; ++i) if (str == special_symbol[i]) return -i;
+		for (int i = 0; i < NUM_OF_SPECIAL_SYMBOL; ++i) if (str == HashTable::special_symbol[i]) return -i;
 		if (IsNumber(str) == 0);
 		else if (IsNumber(str) == 1) str = std::to_string(std::stoi(str));
 		else str = std::to_string(std::stod(str));
 		int str_hash = HashFunction(str);
 		for (; !hash_table[str_hash].symbol.empty() && hash_table[str_hash].symbol != str; ) {
 			if (str_hash < hash_table.size - 1) ++str_hash;
-			else str_hash = NUM_OF_SPECIAL_SYMBOL;
+			else str_hash = 1;
 		}
 		if (hash_table[str_hash].symbol.empty()) {
 			hash_table[str_hash].symbol = str;
@@ -511,9 +557,9 @@ public:
 	int HashFunction(std::string str) {
 		int sum = 0;
 		for (size_t i = 0; i < str.size(); ++i) {
-			sum += str.at(i);
+			sum += str.at(i) * str.at(i);
 		}
-		return NUM_OF_SPECIAL_SYMBOL + sum % (hash_table.size - NUM_OF_SPECIAL_SYMBOL);
+		return 1 + sum % hash_table.size;
 	}
 
 	int Evaluate(int root) {
@@ -533,8 +579,7 @@ public:
 			int evaluated_argument_list = EvaluateArgumentList(memory_table[root].rchild);
 			int number_of_param = 0;
 			Substitute(memory_table[memory_table[function_link].rchild].lchild, evaluated_argument_list, number_of_param);
-			evaluation_stack.Clear();
-			DeallocateExceptLchild(evaluated_argument_list);
+			DeallocateEvaluationTable(evaluated_argument_list);
 			if (runtime_error.occur) {
 				Unsubstitute(number_of_param);
 				return NIL;
@@ -569,7 +614,7 @@ public:
 				return NIL;
 			}
 			hash_table[-arg_hash].link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
-			return hash_table[-arg_hash].link;
+			return arg_hash;
 		}
 		if (function_link == -LAMBDA) {
 			if (memory_table[memory_table[memory_table[root].rchild].rchild].rchild > 0) {
@@ -862,10 +907,9 @@ public:
 	}
 	int EvaluateArgumentList(int argument_list) {
 		if (argument_list == NIL) return NIL;
-		int root = Allocate();
-		evaluation_stack.Push(root);
-		memory_table[root].lchild = Evaluate(memory_table[argument_list].lchild);
-		memory_table[root].rchild = EvaluateArgumentList(memory_table[argument_list].rchild);
+		int root = AllocateEvaluationTable();
+		evaluation_table[root].lchild = Evaluate(memory_table[argument_list].lchild);
+		evaluation_table[root].rchild = EvaluateArgumentList(memory_table[argument_list].rchild);
 		return root;
 	}
 	void Substitute(int parameter_list, int argument_list, int& number_of_param) {
@@ -892,9 +936,9 @@ public:
 			return;
 		}
 		function_stack.Push(Pair(parameter, hash_table[-parameter].link));
-		hash_table[-parameter].link = memory_table[argument_list].lchild;
+		hash_table[-parameter].link = evaluation_table[argument_list].lchild;
 		++number_of_param;
-		Substitute(memory_table[parameter_list].rchild, memory_table[argument_list].rchild, number_of_param);
+		Substitute(memory_table[parameter_list].rchild, evaluation_table[argument_list].rchild, number_of_param);
 		return;
 	}
 	void Unsubstitute(int number_of_param) {
@@ -919,95 +963,127 @@ public:
 		return temp.str();
 	}
 
-	void PrintFreeList() {
-		std::cout << "Free list's root = " << free_list << std::endl;
+	void PrintData(int root) {
+		std::cout << StringOfData(root) << std::endl;
 		return;
 	}
 	void PrintRootOfList(int root) {
-		std::cout << "List's root = " << root << std::endl;
+		std::cout << "List's root=" << root << std::endl;
 		return;
 	}
 	void PrintMemory() {
-		std::cout << "Memory table size = " << memory_table.size << std::endl;
-		std::cout << "Memory table = " << std::endl;
-		std::cout << ROW_DELIM(ROW_WIDTH) << std::endl;
-		for (int i = 0; i < memory_table.size; ++i) {
-			std::cout << COL_DELIM << CENTER_ALIGN_INT(i, INDEX_WIDTH) << COL_DELIM;
-			std::cout << Node::StringOfNode(memory_table[i]) << COL_DELIM << std::endl;
-			std::cout << ROW_DELIM(ROW_WIDTH) << std::endl;
+		// std::cout << "Memory table size = " << memory_table.size << std::endl;
+		// std::cout << "Memory table = " << std::endl;
+		std::cout << "Tree Array" << std::endl;
+		std::cout << ROW_DELIM(ROW_WIDTH_NODE) << std::endl;
+		std::cout << COL_DELIM << CENTER_ALIGN_STR("node", WIDTH) << COL_DELIM;
+		std::cout << Node::StringOfFields() << COL_DELIM << std::endl;
+		std::cout << ROW_DELIM(ROW_WIDTH_NODE) << std::endl;
+		for (int i = 1; i < memory_table.size; ++i) {
+			std::cout << COL_DELIM << CENTER_ALIGN_INT(i, WIDTH) << COL_DELIM;
+			std::cout << memory_table[i].ToString() << COL_DELIM << std::endl;
+			std::cout << ROW_DELIM(ROW_WIDTH_NODE) << std::endl;
 		}
-		std::cout << std::endl;
-		std::cout << "Hash table size = " << hash_table.size << std::endl;
-		std::cout << "Hash table = " << std::endl;
-		std::cout << ROW_DELIM(ROW_WIDTH) << std::endl;
+		// std::cout << std::endl;
+		// std::cout << "Hash table size = " << hash_table.size << std::endl;
+		// std::cout << "Hash table = " << std::endl;
+		std::cout << "Hash Table" << std::endl;
+		std::cout << ROW_DELIM(ROW_WIDTH_SYMBOL) << std::endl;
+		std::cout << COL_DELIM << CENTER_ALIGN_STR("hash value", WIDTH) << COL_DELIM;
+		std::cout << Symbol::StringOfFields() << COL_DELIM << std::endl;
+		std::cout << ROW_DELIM(ROW_WIDTH_SYMBOL) << std::endl;
 		for (int i = 1; i < hash_table.size; ++i) {
 			if (hash_table[i].symbol != std::string()) {
-				std::cout << COL_DELIM << CENTER_ALIGN_INT(i, INDEX_WIDTH) << COL_DELIM;
-				std::cout << Symbol::StringOfSymbol(hash_table[i]) << COL_DELIM << std::endl;
-				std::cout << ROW_DELIM(ROW_WIDTH) << std::endl;
+				std::cout << COL_DELIM << CENTER_ALIGN_INT(-i, WIDTH) << COL_DELIM;
+				std::cout << hash_table[i].ToString() << COL_DELIM << std::endl;
+				std::cout << ROW_DELIM(ROW_WIDTH_SYMBOL) << std::endl;
 			}
 		}
 		std::cout << std::endl;
 		return;
 	}
+	void PrintEvaluationTable() {
+		evaluation_table.PrintFreeList();
+		std::cout << "Evaluation Table" << std::endl;
+		std::cout << ROW_DELIM(ROW_WIDTH_NODE) << std::endl;
+		std::cout << COL_DELIM << CENTER_ALIGN_STR("node", WIDTH) << COL_DELIM;
+		std::cout << Node::StringOfFields() << COL_DELIM << std::endl;
+		std::cout << ROW_DELIM(ROW_WIDTH_NODE) << std::endl;
+		for (int i = 1; i < evaluation_table.size; ++i) {
+			std::cout << COL_DELIM << CENTER_ALIGN_INT(i, WIDTH) << COL_DELIM;
+			std::cout << evaluation_table[i].ToString() << COL_DELIM << std::endl;
+			std::cout << ROW_DELIM(ROW_WIDTH_NODE) << std::endl;
+		}
+	}
 };
-std::string* Interpreter::special_symbol = new std::string[NUM_OF_SPECIAL_SYMBOL];
 
 int main() {
-	Interpreter::InitializeSpecialSymbol();
-	Interpreter scheme(10);
+	HashTable::InitializeSpecialSymbol();
+	Interpreter scheme(30, 1031);
 	while (true) {
 		scheme.ReadLine();
 		scheme.PreprocessBuffer();
+		int root;
+		int result;
 
-		int root = scheme.Read();
-		if (runtime_error.occur) {
-			std::cout << "] ";
-			scheme.PrintFreeList();
-			scheme.PrintRootOfList(root);
-			std::cout << std::endl;
-			scheme.PrintMemory();
+		while (true) {
+			try {
+				root = scheme.Read();
+				if (runtime_error.occur) {
+					std::cout << "] ";
+					scheme.memory_table.PrintFreeList();
+					scheme.PrintRootOfList(root);
+					std::cout << std::endl;
+					scheme.PrintMemory();
 
-			std::cout << "Preprocessd: " << std::endl;
-			std::cout << scheme.buffer.str() << std::endl << std::endl;
-			std::cout << "Command interpreted: " << std::endl;
-			std::cout << scheme.StringOfData(root) << std::endl << std::endl;
-			std::cout << "Command Stack: " << std::endl;
-			scheme.command_stack.Print();
-			scheme.command_stack.Clear();
+					std::cout << "Preprocessd: " << std::endl;
+					std::cout << scheme.buffer.str() << std::endl << std::endl;
+					std::cout << "Command interpreted: " << std::endl;
+					std::cout << scheme.StringOfData(root) << std::endl << std::endl;
+					std::cout << "Command Stack: " << std::endl;
+					scheme.command_stack.Print();
+					scheme.command_stack.Clear();
 
-			std::cout << runtime_error.message.str() << std::endl;
-			scheme.Deallocate(root);
-			runtime_error.Clear();
-			continue;
-		}
+					std::cout << runtime_error.message.str() << std::endl;
+					scheme.Deallocate(root);
+					runtime_error.Clear();
+					continue;
+				}
 
-		int result = scheme.Evaluate(root);
-		if (runtime_error.occur) {
-			std::cout << "] ";
-			scheme.PrintFreeList();
-			scheme.PrintRootOfList(root);
-			std::cout << std::endl;
-			scheme.PrintMemory();
+				result = scheme.Evaluate(root);
+				if (runtime_error.occur) {
+					std::cout << "] ";
+					scheme.memory_table.PrintFreeList();
+					scheme.PrintRootOfList(root);
+					std::cout << std::endl;
+					scheme.PrintMemory();
 
-			std::cout << "Preprocessd: " << std::endl;
-			std::cout << scheme.buffer.str() << std::endl << std::endl;
-			std::cout << "Command interpreted: " << std::endl;
-			std::cout << scheme.StringOfData(root) << std::endl << std::endl;
-			std::cout << "Command Stack: " << std::endl;
-			scheme.command_stack.Print();
-			scheme.command_stack.Clear();
+					std::cout << "Preprocessd: " << std::endl;
+					std::cout << scheme.buffer.str() << std::endl << std::endl;
+					std::cout << "Command interpreted: " << std::endl;
+					std::cout << scheme.StringOfData(root) << std::endl << std::endl;
+					std::cout << "Command Stack: " << std::endl;
+					scheme.command_stack.Print();
+					scheme.command_stack.Clear();
 
-			std::cout << runtime_error.message.str() << std::endl;
-			scheme.Deallocate(root);
-			runtime_error.Clear();
-			continue;
+					std::cout << runtime_error.message.str() << std::endl;
+					scheme.Deallocate(root);
+					runtime_error.Clear();
+					continue;
+				}
+				break;
+			}
+			catch (GarbageCollection& e) {
+				scheme.buffer.str(scheme.buffer.str());
+				scheme.buffer.clear();
+				continue;
+			}
 		}
 
 		std::cout << "] ";
-		scheme.PrintFreeList();
+		scheme.PrintData(result);
+		scheme.memory_table.PrintFreeList();
 		scheme.PrintRootOfList(root);
-		std::cout << std::endl;
 		scheme.PrintMemory();
 
 		std::cout << "Preprocessd: " << std::endl;
