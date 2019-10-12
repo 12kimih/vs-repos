@@ -2,6 +2,8 @@
 TODO
 1. separate boolean values from pre-defined keywords
 2. ensure evaluation table's free list is arranged in a ascending order
+3. memory doubling bound to MemoryTable class
+4. print functions for MemoryTable, HashTable class
 */
 #include <iostream>
 #include <string>
@@ -20,10 +22,6 @@ public:
 class StackError : public std::runtime_error {
 public:
 	StackError(std::string msg) : runtime_error(msg) {}
-};
-class GarbageCollection : public std::exception {
-public:
-	GarbageCollection() : std::exception() {}
 };
 
 const int WIDTH = 15;
@@ -133,6 +131,7 @@ public:
 		flag = ref.flag;
 		return *this;
 	}
+
 	static std::string StringOfFields() {
 		std::stringstream temp;
 		temp << CENTER_ALIGN_STR("left child", WIDTH);
@@ -164,6 +163,7 @@ public:
 		link = ref.link;
 		return *this;
 	}
+
 	static std::string StringOfFields() {
 		std::stringstream temp;
 		temp << CENTER_ALIGN_STR("symbol", WIDTH);
@@ -330,14 +330,14 @@ public:
 	MemoryTable memory_table;
 	HashTable hash_table;
 	std::stringstream buffer;
-	// Stack<int> command_stack;
+	Stack<int> command_stack;
 	Stack<Pair> function_stack;
 	MemoryTable evaluation_table;
 	Interpreter(int memory_table_size = 30, int hash_table_size = NUM_OF_SPECIAL_SYMBOL + 997) :
 		memory_table(MemoryTable(memory_table_size)),
 		hash_table(HashTable(hash_table_size)),
 		buffer(std::stringstream()),
-		// command_stack(Stack<int>()),
+		command_stack(Stack<int>()),
 		function_stack(Stack<Pair>()),
 		evaluation_table(MemoryTable()) {}
 	~Interpreter() {}
@@ -368,13 +368,12 @@ public:
 		if (memory_table.free_list == NIL) {
 			GarbageCollect();
 			if (memory_table.free_list == NIL) {
+				std::cout << "----- memory doubling -----" << std::endl;
 				MemoryTable doubled_table(2 * memory_table.size);
 				for (int i = 0; i < memory_table.size; ++i) doubled_table[i] = memory_table[i];
-				for (int i = memory_table.size; i < 2 * memory_table.size - 1; ++i) doubled_table[i].rchild = i + 1;
-				memory_table.free_list = memory_table.size;
+				doubled_table.free_list = memory_table.size;
 				memory_table = std::move(doubled_table);
 			}
-			else throw GarbageCollection();
 		}
 		int temp = memory_table.free_list;
 		memory_table.free_list = memory_table[temp].rchild;
@@ -386,7 +385,7 @@ public:
 		for (int i = 1; i < memory_table.size; ++i) memory_table[i].flag = false;
 		for (int i = 0; i < hash_table.size; ++i) MarkFlag(hash_table[i].link);
 		for (int i = 0; i <= function_stack.top; ++i) MarkFlag(function_stack[i].link);
-		// for (int i = 0; i <= command_stack.top; ++i) MarkFlag(command_stack[i]);
+		for (int i = 0; i <= command_stack.top; ++i) memory_table[command_stack[i]].flag = true;
 		for (int i = memory_table.size - 1; i > 0; --i) {
 			if (!memory_table[i].flag) {
 				memory_table[i].lchild = NIL;
@@ -407,8 +406,7 @@ public:
 		if (evaluation_table.free_list == NIL) {
 			MemoryTable doubled_table(2 * evaluation_table.size);
 			for (int i = 0; i < evaluation_table.size; ++i) doubled_table[i] = evaluation_table[i];
-			for (int i = evaluation_table.size; i < 2 * evaluation_table.size - 1; ++i) doubled_table[i].rchild = i + 1;
-			evaluation_table.free_list = evaluation_table.size;
+			doubled_table.free_list = evaluation_table.size;
 			evaluation_table = std::move(doubled_table);
 		}
 		int temp = evaluation_table.free_list;
@@ -517,7 +515,7 @@ public:
 		if (token_hash == 0) throw ReadError("The number of left and right parentheses does not match");
 		if (token_hash == -RIGHT_PAREN) return NIL;
 		int root = Allocate();
-		// command_stack.Push(root);
+		command_stack.Push(root);
 		if (token_hash == -LEFT_PAREN) memory_table[root].lchild = Read(true);
 		else memory_table[root].lchild = token_hash;
 		memory_table[root].rchild = Read(true);
@@ -586,7 +584,7 @@ public:
 			if (memory_table[memory_table[root].rchild].rchild > 0) throw EvaluationError("1 argument is expected for LIST but more than 1 argument were passed");
 			int arg_link = Evaluate(memory_table[memory_table[root].rchild].lchild);
 			int root = Allocate();
-			// command_stack.Push(root);
+			command_stack.Push(root);
 			memory_table[root].lchild = arg_link;
 			memory_table[root].rchild = NIL;
 			return root;
@@ -727,7 +725,7 @@ public:
 			int arg2_link = Evaluate(memory_table[memory_table[memory_table[root].rchild].rchild].lchild);
 			if (arg2_link < 0) throw EvaluationError("The second argument to CONS cannot be a symbol");
 			int root = Allocate();
-			// command_stack.Push(root);
+			command_stack.Push(root);
 			memory_table[root].lchild = arg1_link;
 			memory_table[root].rchild = arg2_link;
 			return root;
@@ -854,6 +852,7 @@ public:
 			std::cout << evaluation_table[i].ToString() << COL_DELIM << std::endl;
 			std::cout << ROW_DELIM(ROW_WIDTH_NODE) << std::endl;
 		}
+		return;
 	}
 };
 
@@ -865,51 +864,38 @@ int main() {
 		scheme.PreprocessBuffer();
 		int root;
 		int result;
+		try {
+			root = scheme.Read();
+			result = scheme.Evaluate(root);
+			scheme.command_stack.Clear();
 
-		while (true) {
-			try {
-				root = scheme.Read();
-				result = scheme.Evaluate(root);
-				// scheme.command_stack.Clear();
-				break;
-			}
-			catch (ReadError& e) {
-				std::cout << e.what() << std::endl;
-				// scheme.command_stack.Clear();
-				scheme.Deallocate(root);
-				break;
-			}
-			catch (EvaluationError& e) {
-				std::cout << e.what() << std::endl;
-				// scheme.command_stack.Clear();
-				scheme.Unsubstitute();
-				scheme.DeallocateEvaluationTable();
-				scheme.Deallocate(root);
-				break;
-			}
-			catch (GarbageCollection&) {
-				scheme.Unsubstitute();
-				scheme.DeallocateEvaluationTable();
-				scheme.buffer.seekg(0, std::ios_base::beg);
-				scheme.buffer.clear();
-				continue;
-			}
+			std::cout << "] ";
+			scheme.PrintData(result);
+			scheme.memory_table.PrintFreeList();
+			scheme.PrintRootOfList(root);
+			scheme.PrintMemory();
+
+			/*
+			std::cout << "Preprocessd: " << std::endl;
+			std::cout << scheme.buffer.str() << std::endl << std::endl;
+			std::cout << "Command Interpreted: " << std::endl;
+			std::cout << scheme.StringOfData(root) << std::endl << std::endl;
+			std::cout << "Result: " << std::endl;
+			std::cout << scheme.StringOfData(result) << std::endl << std::endl;
+			*/
 		}
-
-		std::cout << "] ";
-		scheme.PrintData(result);
-		scheme.memory_table.PrintFreeList();
-		scheme.PrintRootOfList(root);
-		scheme.PrintMemory();
-
-		/*
-		std::cout << "Preprocessd: " << std::endl;
-		std::cout << scheme.buffer.str() << std::endl << std::endl;
-		std::cout << "Command Interpreted: " << std::endl;
-		std::cout << scheme.StringOfData(root) << std::endl << std::endl;
-		std::cout << "Result: " << std::endl;
-		std::cout << scheme.StringOfData(result) << std::endl << std::endl;
-		*/
+		catch (ReadError& e) {
+			std::cout << e.what() << std::endl;
+			scheme.command_stack.Clear();
+			scheme.Deallocate(root);
+		}
+		catch (EvaluationError& e) {
+			std::cout << e.what() << std::endl;
+			scheme.command_stack.Clear();
+			scheme.Unsubstitute();
+			scheme.DeallocateEvaluationTable();
+			scheme.Deallocate(root);
+		}
 	}
 	return 0;
 }
