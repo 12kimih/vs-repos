@@ -541,7 +541,9 @@ public:
 		for (size_t i = 0; i < str.size(); ++i) {
 			sum += str.at(i) * str.at(i);
 		}
-		return 1 + sum % hash_table.size;
+		int res = sum % hash_table.size;
+		if (res == 0) return 1;
+		else return res;
 	}
 
 	int Evaluate(int root) {
