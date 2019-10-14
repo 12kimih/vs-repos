@@ -194,6 +194,7 @@ public:
 	}
 };
 
+/*
 enum SpecialSymbol {
 	NIL, LEFT_PAREN, RIGHT_PAREN, QUOTE,
 	DEFINE, LAMBDA, LIST,
@@ -202,6 +203,17 @@ enum SpecialSymbol {
 	NOT, isNULL, isNUMBER, isSYMBOL, isPAIR, isEQ, isEQUAL,
 	IF, COND, ELSE,
 	CAR, CDR, CONS,
+	NUM_OF_SPECIAL_SYMBOL
+};
+*/
+enum SpecialSymbol {
+	NIL, LEFT_PAREN, RIGHT_PAREN,
+	TRUE, FALSE,
+	PLUS, MINUS, TIMES,
+	isNUMBER, isSYMBOL, isNULL,
+	CONS, COND, ELSE, CAR, CDR,
+	DEFINE, QUOTE, LAMBDA,
+	DIVIDE, NOT, isPAIR, isEQ, isEQUAL, IF, LIST,
 	NUM_OF_SPECIAL_SYMBOL
 };
 class MemoryTable {
